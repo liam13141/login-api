@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import json, os
 
-app = FastAPI(title="FM Radio Login API", description="Login system with auto-login and dev panel")
+app = FastAPI(title="FM Radio Login API", description="Login system with auto-login, ban system, and delete account")
 
 # Allow local HTML/JS access
 app.add_middleware(
@@ -79,6 +79,19 @@ def unban_user(data: BanModel):
 def logout():
     return {"message": "Logged out successfully"}
 
+# 🗑️ NEW: Delete Account
+@app.post("/delete")
+def delete_account(username: str = Form(...), password: str = Form(...)):
+    users = load_users()
+    if username not in users:
+        raise HTTPException(status_code=404, detail="User not found")
+    if users[username]["password"] != password:
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    
+    del users[username]
+    save_users(users)
+    return {"message": f"Account '{username}' deleted successfully."}
+
 # --------------------------
 # Developer Panel (HTML)
 # --------------------------
@@ -97,6 +110,7 @@ def dev_panel():
             button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
             .ban { background: #ef4444; color: white; }
             .unban { background: #22c55e; color: white; }
+            .delete { background: #f87171; color: white; }
             .status { font-weight: 500; }
             #logoutBtn { margin-top: 20px; background: #6366f1; color: white; padding: 10px 20px; border-radius: 8px; }
         </style>
@@ -104,7 +118,7 @@ def dev_panel():
     <body>
         <h1>🛠️ FM Radio Developer Panel</h1>
         <table>
-            <tr><th>Username</th><th>Status</th><th>Action</th></tr>
+            <tr><th>Username</th><th>Status</th><th>Actions</th></tr>
     """
     for username, info in users.items():
         banned = info.get("banned", False)
@@ -115,7 +129,10 @@ def dev_panel():
             <tr id='row-{username}'>
                 <td>{username}</td>
                 <td class='status'>{status}</td>
-                <td><button class='{button_class}' onclick="toggleBan('{username}', {str(banned).lower()})">{button_label}</button></td>
+                <td>
+                    <button class='{button_class}' onclick="toggleBan('{username}', {str(banned).lower()})">{button_label}</button>
+                    <button class='delete' onclick="deleteAccount('{username}')">🗑️ Delete</button>
+                </td>
             </tr>
         """
     html += """
@@ -123,23 +140,26 @@ def dev_panel():
         <button id="logoutBtn" onclick="logout()">🚪 Log Out</button>
 
         <script>
-        // Auto-login check
-        window.onload = async () => {
-            const savedUser = localStorage.getItem('fmradio_user');
-            const savedPass = localStorage.getItem('fmradio_pass');
-            if (savedUser && savedPass) {
-                console.log(`Auto-logged in as ${savedUser}`);
-            } else {
-                console.log("Guest mode active");
-            }
-        };
-
         // Toggle Ban/Unban
         async function toggleBan(username, isBanned) {
             const endpoint = isBanned ? '/unban' : '/ban';
             const body = JSON.stringify({ username });
             const headers = { 'Content-Type': 'application/json' };
             const res = await fetch(endpoint, { method: 'POST', headers, body });
+            const data = await res.json();
+            alert(data.message);
+            location.reload();
+        }
+
+        // 🗑️ Delete Account
+        async function deleteAccount(username) {
+            if (!confirm(`Are you sure you want to permanently delete '${username}'?`)) return;
+            const password = prompt("Enter the password for this account to confirm:");
+            if (!password) return alert("Deletion cancelled.");
+            const form = new FormData();
+            form.append("username", username);
+            form.append("password", password);
+            const res = await fetch("/delete", { method: "POST", body: form });
             const data = await res.json();
             alert(data.message);
             location.reload();
