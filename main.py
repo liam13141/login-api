@@ -65,6 +65,158 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
     save_json(DB_FILE, users)
     return {"message": f"Account created for {username}"}
 
+@app.get("/dev", response_class=HTMLResponse)
+def dev_panel():
+    users = load_users()
+    banned_ips = load_bans()
+
+    html = """
+    <html>
+    <head>
+        <title>FM Radio Developer Panel</title>
+        <style>
+            body {
+                font-family: Poppins, sans-serif;
+                background: #0f172a;
+                color: #f1f5f9;
+                text-align: center;
+                padding-bottom: 40px;
+            }
+            h1 { color: #38bdf8; }
+            table {
+                margin: 20px auto;
+                border-collapse: collapse;
+                width: 90%;
+                max-width: 1000px;
+            }
+            th, td {
+                padding: 12px 20px;
+                border-bottom: 1px solid #334155;
+                font-size: 14px;
+            }
+            button {
+                padding: 6px 14px;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 600;
+            }
+            .ban { background: #ef4444; color: white; }
+            .unban { background: #22c55e; color: white; }
+            .delete { background: #f87171; color: white; }
+            .ipban { background: #fb923c; color: black; }
+            .ipunban { background: #4ade80; color: black; }
+            .status { font-weight: 500; }
+            #logoutBtn {
+                margin-top: 20px;
+                background: #6366f1;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>🛠️ FM Radio Developer Panel</h1>
+
+        <h3>Total Users: """ + str(len(users)) + """</h3>
+        <h3>Banned IPs: """ + str(len(banned_ips)) + """</h3>
+
+        <table>
+            <tr>
+                <th>Username</th>
+                <th>IP</th>
+                <th>User Status</th>
+                <th>IP Status</th>
+                <th>Actions</th>
+            </tr>
+    """
+
+    # Loop users
+    for username, info in users.items():
+        ip = info.get("ip", "Unknown")
+        is_banned = info.get("banned", False)
+        ip_banned = ip in banned_ips if ip != "Unknown" else False
+
+        user_status = "🚫 User Banned" if is_banned else "✅ Active"
+        ip_status = "🔥 IP Banned" if ip_banned else "🟢 Allowed"
+
+        user_btn_class = "unban" if is_banned else "ban"
+        user_btn_label = "Unban User" if is_banned else "Ban User"
+
+        ip_btn_class = "ipunban" if ip_banned else "ipban"
+        ip_btn_label = "Unban IP" if ip_banned else "Ban IP"
+
+        html += f"""
+            <tr id="row-{username}">
+                <td>{username}</td>
+                <td>{ip}</td>
+                <td class="status">{user_status}</td>
+                <td class="status">{ip_status}</td>
+                <td>
+                    <button class="{user_btn_class}" onclick="toggleBan('{username}', {str(is_banned).lower()})">{user_btn_label}</button>
+                    <button class="{ip_btn_class}" onclick="toggleIP('{ip}', {str(ip_banned).lower()})">{ip_btn_label}</button>
+                    <button class="delete" onclick="deleteAccount('{username}')">🗑️ Delete</button>
+                </td>
+            </tr>
+        """
+
+    html += """
+        </table>
+
+        <button id="logoutBtn" onclick="logout()">🚪 Log Out</button>
+
+        <script>
+        // Toggle User Ban
+        async function toggleBan(username, isBanned) {
+            const endpoint = isBanned ? '/unban' : '/ban';
+            const body = JSON.stringify({ username });
+            const headers = { 'Content-Type': 'application/json' };
+            const res = await fetch(endpoint, { method: 'POST', headers, body });
+            const data = await res.json();
+            alert(data.message);
+            location.reload();
+        }
+
+        // Toggle IP Ban
+        async function toggleIP(ip, banned) {
+            const endpoint = banned ? '/unban_ip' : '/ban_ip';
+            const body = JSON.stringify({ ip });
+            const headers = { 'Content-Type': 'application/json' };
+            const res = await fetch(endpoint, { method: 'POST', headers, body });
+            const data = await res.json();
+            alert(data.message);
+            location.reload();
+        }
+
+        // Delete User
+        async function deleteAccount(username) {
+            if (!confirm("Delete user '" + username + "' permanently?")) return;
+            const form = new FormData();
+            form.append("username", username);
+            const res = await fetch('/delete', { method: 'POST', body: form });
+            const data = await res.json();
+            alert(data.message);
+            location.reload();
+        }
+
+        // Logout
+        async function logout() {
+            localStorage.removeItem('fmradio_user');
+            localStorage.removeItem('fmradio_pass');
+            const res = await fetch('/logout', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message);
+            location.reload();
+        }
+        </script>
+
+    </body>
+    </html>
+    """
+
+    return html
+
 
 # ---------- LOGIN ----------
 @app.post("/login")
