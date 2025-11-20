@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Form, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 import json, os
 
-app = FastAPI(title="FM Radio Login API", description="Login system with IP ban protection")
+app = FastAPI(title="FM Radio Login API", description="Login system with IP-ban, account-ban, and secure dev panel")
 
+# =========================
 # CORS
+# =========================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,11 +16,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =========================
+# FILES
+# =========================
 DB_FILE = "users.json"
 BAN_IP_FILE = "banned_ips.json"
 
+DEV_CODE = "17731"   # Required to enter /dev
 
-# ---------- JSON HELPERS ----------
+
+# =========================
+# HELPER FUNCTIONS
+# =========================
 def load_json(path):
     if not os.path.exists(path):
         return {}
@@ -32,32 +41,40 @@ def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
-
 def load_users():
     return load_json(DB_FILE)
 
-def save_users(data):
-    save_json(DB_FILE, data)
+def save_users(d):
+    save_json(DB_FILE, d)
 
 def load_bans():
     return load_json(BAN_IP_FILE)
 
-def save_bans(data):
-    save_json(BAN_IP_FILE, data)
+def save_bans(d):
+    save_json(BAN_IP_FILE, d)
 
-
-# ---------- GET USER IP ----------
+# REAL IP — supports render, cloudflare, proxies
 def get_ip(request: Request):
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real = request.headers.get("X-Real-IP")
+    if real:
+        return real.strip()
     return request.client.host
 
 
-# ---------- HOME ----------
+# ===============================
+# HOME
+# ===============================
 @app.get("/")
 def home():
-    return {"message": "FM Radio Login API running!"}
+    return {"message": "FM Radio Login API is running!"}
 
 
-# ---------- SIGNUP ----------
+# ===============================
+# SIGNUP
+# ===============================
 @app.post("/signup")
 def signup(request: Request, username: str = Form(...), password: str = Form(...)):
     ip = get_ip(request)
@@ -77,11 +94,12 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
     }
 
     save_users(users)
-    return {"message": f"Account created for {username}", "ip": ip}
+    return {"message": f"Account created for {username}"}
 
 
-
-# ---------- LOGIN ----------
+# ===============================
+# LOGIN
+# ===============================
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     ip = get_ip(request)
@@ -102,11 +120,12 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     if user.get("banned", False):
         return {"message": "User is banned", "user": username, "banned": True}
 
-    return {"message": f"Welcome back, {username}!", "user": username, "banned": False, "ip": ip}
+    return {"message": f"Welcome back, {username}!", "user": username, "banned": False}
 
 
-
-# ---------- BAN USER + IP ----------
+# ===============================
+# BAN USER
+# ===============================
 @app.post("/ban")
 def ban_user(username: str = Form(...)):
     users = load_users()
@@ -118,17 +137,19 @@ def ban_user(username: str = Form(...)):
     ip = users[username].get("ip")
 
     users[username]["banned"] = True
+
     if ip:
         banned_ips[ip] = True
 
     save_users(users)
     save_bans(banned_ips)
 
-    return {"message": f"{username} banned and IP {ip} blocked."}
+    return {"message": f"{username} and IP {ip} have been banned."}
 
 
-
-# ---------- UNBAN USER + IP ----------
+# ===============================
+# UNBAN USER
+# ===============================
 @app.post("/unban")
 def unban_user(username: str = Form(...)):
     users = load_users()
@@ -140,40 +161,21 @@ def unban_user(username: str = Form(...)):
     ip = users[username].get("ip")
 
     users[username]["banned"] = False
+
     if ip in banned_ips:
         del banned_ips[ip]
 
     save_users(users)
     save_bans(banned_ips)
 
-    return {"message": f"{username} unbanned and IP {ip} unblocked."}
+    return {"message": f"{username} and IP {ip} have been unbanned."}
 
 
-
-# ---------- DIRECT IP BAN ----------
-@app.post("/ban_ip")
-def ban_ip(ip: str = Form(...)):
-    banned_ips = load_bans()
-    banned_ips[ip] = True
-    save_bans(banned_ips)
-    return {"message": f"IP {ip} is now banned."}
-
-
-
-# ---------- DIRECT IP UNBAN ----------
-@app.post("/unban_ip")
-def unban_ip(ip: str = Form(...)):
-    banned_ips = load_bans()
-    if ip in banned_ips:
-        del banned_ips[ip]
-        save_bans(banned_ips)
-    return {"message": f"IP {ip} has been unbanned."}
-
-
-
-# ---------- DELETE ACCOUNT ----------
+# ===============================
+# DELETE USER
+# ===============================
 @app.post("/delete")
-def delete_account(username: str = Form(...)):
+def delete_user(username: str = Form(...)):
     users = load_users()
 
     if username not in users:
@@ -181,102 +183,148 @@ def delete_account(username: str = Form(...)):
 
     del users[username]
     save_users(users)
-    return {"message": f"Account '{username}' deleted."}
+
+    return {"message": f"Deleted account '{username}'"}
+
+
+# ===============================
+# LOGOUT
+# ===============================
+@app.post("/logout")
+def logout():
+    return {"message": "Logged out"}
 
 
 
-# ---------- DEV PANEL ----------
+# ============================================================
+# SECURE ADMIN PANEL WITH ACCESS CODE (17731 REQUIRED)
+# ============================================================
 @app.get("/dev", response_class=HTMLResponse)
-def dev_panel():
+def dev_panel(request: Request, code: str = None):
+    # If no correct code → show code prompt
+    if code != DEV_CODE:
+        return """
+        <html>
+        <head>
+            <title>Developer Access</title>
+            <style>
+                body {
+                    background:#0f172a; color:#f1f5f9;
+                    display:flex; align-items:center; justify-content:center;
+                    height:100vh; font-family: Poppins, sans-serif;
+                }
+                .box {
+                    background:#1e293b; padding:30px;
+                    border-radius:10px; text-align:center;
+                    width:340px;
+                    box-shadow:0 0 20px rgba(0,0,0,0.4);
+                }
+                input {
+                    padding:10px; border-radius:6px;
+                    border:none; width:200px; margin-bottom:10px;
+                    background:#334155; color:white;
+                    font-size:16px;
+                }
+                button {
+                    padding:10px 16px; border-radius:6px;
+                    border:none; cursor:pointer;
+                    background:#38bdf8; color:black;
+                    font-weight:700; font-size:15px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h2>🔐 Developer Access</h2>
+                <p>Enter access code:</p>
+                <form method="get">
+                    <input type="text" name="code" placeholder="Enter code">
+                    <br>
+                    <button type="submit">Unlock</button>
+                </form>
+            </div>
+        </body>
+        </html>
+        """
+
+    # If code correct → show real dev panel
     users = load_users()
     banned_ips = load_bans()
 
-    html = """
+    # Build HTML rows
+    rows = ""
+    for username, info in users.items():
+        ip = info.get("ip", "Unknown")
+        is_banned = info.get("banned", False)
+        ip_is_banned = ip in banned_ips
+
+        rows += f"""
+            <tr>
+                <td>{username}</td>
+                <td>{ip}</td>
+                <td>{"🚫 Banned" if is_banned else "✅ Active"}</td>
+                <td>{"🔥 Banned" if ip_is_banned else "🟢 Allowed"}</td>
+                <td>
+                    <form action="/ban" method="post" style="display:inline;">
+                        <input type="hidden" name="username" value="{username}">
+                        <button style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;">Ban</button>
+                    </form>
+                    <form action="/unban" method="post" style="display:inline;">
+                        <input type="hidden" name="username" value="{username}">
+                        <button style="background:#22c55e;color:white;border:none;padding:6px 10px;border-radius:6px;">Unban</button>
+                    </form>
+                    <form action="/delete" method="post" style="display:inline;">
+                        <input type="hidden" name="username" value="{username}">
+                        <button style="background:#f87171;color:white;border:none;padding:6px 10px;border-radius:6px;">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        """
+
+    return f"""
     <html>
     <head>
-        <title>FM Radio Developer Panel</title>
+        <title>FM Developer Panel</title>
         <style>
-            body { font-family: Poppins, sans-serif; background: #0f172a; color: #f1f5f9; text-align: center; }
-            h1 { color: #38bdf8; }
-            table { margin: 20px auto; border-collapse: collapse; width: 90%; }
-            th, td { padding: 12px 20px; border-bottom: 1px solid #334155; }
-            button { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; }
-            .ban { background: #ef4444; color: white; }
-            .unban { background: #22c55e; color: white; }
-            .delete { background: #f87171; color: white; }
-            .ipban { background: #fb923c; }
-            .ipunban { background: #4ade80; }
+            body {{
+                background:#0f172a; color:#f1f5f9;
+                font-family: Poppins, sans-serif;
+                padding:20px;
+            }}
+            table {{
+                width:100%; border-collapse:collapse;
+                background:#1e293b; border-radius:8px;
+                overflow:hidden;
+            }}
+            th, td {{
+                padding:12px; border-bottom:1px solid #334155;
+            }}
+            th {{
+                background:#0f172a;
+            }}
+            h1 {{
+                text-align:center; margin-bottom:20px;
+                color:#38bdf8;
+            }}
         </style>
     </head>
     <body>
         <h1>🛠️ FM Radio Developer Panel</h1>
-        <h3>Total Users: """ + str(len(users)) + """</h3>
-        <h3>Banned IPs: """ + str(len(banned_ips)) + """</h3>
         <table>
-            <tr><th>Username</th><th>IP</th><th>User Status</th><th>IP Status</th><th>Actions</th></tr>
-    """
-
-    for username, info in users.items():
-        ip = info.get("ip", "Unknown")
-        user_banned = info.get("banned", False)
-        ip_banned = ip in banned_ips if ip != "Unknown" else False
-
-        html += f"""
-        <tr>
-            <td>{username}</td>
-            <td>{ip}</td>
-            <td>{'🚫 Banned' if user_banned else '✅ Active'}</td>
-            <td>{'🔥 IP Banned' if ip_banned else '🟢 Allowed'}</td>
-            <td>
-                <button class="{'unban' if user_banned else 'ban'}"
-                    onclick="toggleBan('{username}', {str(user_banned).lower()})">
-                    {'Unban' if user_banned else 'Ban'}
-                </button>
-
-                <button class="{'ipunban' if ip_banned else 'ipban'}"
-                    onclick="toggleIP('{ip}', {str(ip_banned).lower()})">
-                    {'Unban IP' if ip_banned else 'Ban IP'}
-                </button>
-
-                <button class="delete" onclick="deleteAcc('{username}')">Delete</button>
-            </td>
-        </tr>
-        """
-
-    html += """
+            <tr>
+                <th>Username</th>
+                <th>IP</th>
+                <th>User Status</th>
+                <th>IP Status</th>
+                <th>Actions</th>
+            </tr>
+            {rows}
         </table>
-
-        <script>
-        async function toggleBan(username, banned) {
-            const endpoint = banned ? "/unban" : "/ban";
-            const form = new FormData();
-            form.append("username", username);
-            let r = await fetch(endpoint, { method: "POST", body: form });
-            alert((await r.json()).message);
-            location.reload();
-        }
-
-        async function toggleIP(ip, banned) {
-            const endpoint = banned ? "/unban_ip" : "/ban_ip";
-            const form = new FormData();
-            form.append("ip", ip);
-            let r = await fetch(endpoint, { method: "POST", body: form });
-            alert((await r.json()).message);
-            location.reload();
-        }
-
-        async function deleteAcc(username) {
-            if (!confirm("Delete '" + username + "'?")) return;
-            const form = new FormData();
-            form.append("username", username);
-            let r = await fetch("/delete", { method: "POST", body: form });
-            alert((await r.json()).message);
-            location.reload();
-        }
-        </script>
-
     </body>
     </html>
     """
 
-    return html
+
+# ============================================================
+# END OF FILE
+# ============================================================
