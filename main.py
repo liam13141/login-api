@@ -350,17 +350,33 @@ def banlog(code: str = None):
     """
 
 @app.get("/dev", response_class=HTMLResponse)
-def dev_panel(code: str = None, user=Depends(get_current_user)):
-    # Permission check
-    if user["role"] not in ["admin", "owner"]:
-        return "<h3>Access denied</h3>"
-
+def dev_panel(request: Request, code: str = None, token: str = None):
     users = load_users()
-    rows = ""
 
+    # If token was provided, try normal login
+    if token:
+        try:
+            data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username = data["sub"]
+            role = users[username]["role"]
+        except:
+            return "<h3>Invalid token</h3>"
+    else:
+        # If no token, require DEV_CODE only
+        if code != DEV_CODE:
+            return "<h3>Access denied</h3>"
+        # fallback role = owner
+        username = "devcode"
+        role = "owner"
+
+    # Check role permissions
+    if role not in ["admin", "owner"]:
+        return "<h3>Admins only</h3>"
+
+    rows = ""
     for u, d in users.items():
-        ban_reason = d.get("ban_reason", "")
-        ban_expires = d.get("ban_expires", "")
+        ban_reason = d.get("ban_reason")
+        ban_expires = d.get("ban_expires")
 
         rows += f"""
         <tr>
@@ -371,17 +387,15 @@ def dev_panel(code: str = None, user=Depends(get_current_user)):
             <td>{ban_expires}</td>
 
             <td>
-                <!-- BAN USER -->
                 <form action="/ban" method="post" style="display:inline-block;">
                     <input type="hidden" name="username" value="{u}">
                     <input name="reason" placeholder="reason" style="width:90px;">
-                    <input name="duration" placeholder="secs" type="number" style="width:60px;">
+                    <input name="duration" type="number" placeholder="secs" style="width:60px;">
                     <button>Ban</button>
                 </form>
             </td>
 
             <td>
-                <!-- UNBAN -->
                 <form action="/unban" method="post" style="display:inline-block;">
                     <input type="hidden" name="username" value="{u}">
                     <button>Unban</button>
@@ -389,36 +403,34 @@ def dev_panel(code: str = None, user=Depends(get_current_user)):
             </td>
 
             <td>
-                <!-- DELETE USER (OWNER ONLY) -->
-                {"<form action='/delete' method='post' style='display:inline-block;'><input type='hidden' name='username' value='"+u+"'><button>Delete</button></form>" if user['role']=='owner' else "<span>Owner only</span>"}
+                {"<form action='/delete' method='post'><input type='hidden' name='username' value='"+u+"'><button>Delete</button></form>" if role=='owner' else "<span>Owner only</span>"}
             </td>
 
             <td>
-                <!-- PROMOTE USER (OWNER ONLY) -->
-                {"<form action='/promote' method='post' style='display:inline-block;'><input type='hidden' name='username' value='"+u+"'><select name='role'><option value='user'>user</option><option value='admin'>admin</option><option value='owner'>owner</option></select><button>Set</button></form>" if user['role']=='owner' else "<span>Owner only</span>"}
+                {"<form action='/promote' method='post'><input type='hidden' name='username' value='"+u+"'><select name='role'><option value='user'>user</option><option value='admin'>admin</option><option value='owner'>owner</option></select><button>Set</button></form>" if role=='owner' else "<span>Owner only</span>"}
             </td>
         </tr>
         """
 
     return f"""
     <html>
-        <body style="background:#0f172a;color:white;">
-            <h2>FM Radio Developer Panel</h2>
-            <table border=1>
-                <tr>
-                    <th>User</th>
-                    <th>Role</th>
-                    <th>IP</th>
-                    <th>Ban Reason</th>
-                    <th>Ban Expires</th>
-                    <th>Ban</th>
-                    <th>Unban</th>
-                    <th>Delete</th>
-                    <th>Promote</th>
-                </tr>
-                {rows}
-            </table>
-        </body>
+    <body style='background:#0f172a;color:white;'>
+        <h2>FM Radio Developer Panel</h2>
+        <table border=1>
+            <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>IP</th>
+                <th>Ban Reason</th>
+                <th>Ban Expires</th>
+                <th>Ban</th>
+                <th>Unban</th>
+                <th>Delete</th>
+                <th>Promote</th>
+            </tr>
+            {rows}
+        </table>
+    </body>
     </html>
     """
 
