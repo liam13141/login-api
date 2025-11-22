@@ -355,21 +355,72 @@ def dev(code: str = None):
         return "<h3>Access denied</h3>"
 
     users = load_users()
+
     rows = ""
-    for u, d in users.items():
-        rows += f"<tr><td>{u}</td><td>{d.get('role')}</td><td>{d.get('ip')}</td></tr>"
+    for username, data in users.items():
+        ip = data.get("ip", "N/A")
+        role = data.get("role", "user")
+        banned = data.get("banned", False)
+        reason = data.get("ban_reason", "—")
+        expires = data.get("ban_expires", "—")
+
+        status = "🚫 BANNED" if banned else "✅ Active"
+
+        rows += f"""
+        <tr>
+            <td>{username}</td>
+            <td>{ip}</td>
+            <td>{role}</td>
+            <td>{status}</td>
+            <td>{reason}</td>
+            <td>{expires}</td>
+            <td>
+                <form action="/ban" method="post" style="display:inline;">
+                    <input type="hidden" name="username" value="{username}">
+                    <input type="hidden" name="reason" value="Manual ban">
+                    <input type="hidden" name="duration" value="0">
+                    <button style="background:red;color:white;">Ban</button>
+                </form>
+
+                <form action="/unban" method="post" style="display:inline;">
+                    <input type="hidden" name="username" value="{username}">
+                    <button style="background:green;color:white;">Unban</button>
+                </form>
+
+                <form action="/delete" method="post" style="display:inline;">
+                    <input type="hidden" name="username" value="{username}">
+                    <button style="background:darkred;color:white;">Delete</button>
+                </form>
+
+                <form action="/promote" method="post" style="display:inline;">
+                    <input type="hidden" name="username" value="{username}">
+                    <input type="hidden" name="role" value="admin">
+                    <button style="background:blue;color:white;">Promote</button>
+                </form>
+            </td>
+        </tr>
+        """
 
     return f"""
     <html>
-    <body style='background:#0f172a;color:white;'>
-    <h2>Developer Panel</h2>
-    <table border=1>
-    <tr><th>User</th><th>Role</th><th>IP</th></tr>
-    {rows}
-    </table>
+    <body style="background:#0f172a;color:white;font-family:sans-serif;">
+        <h2>Developer Panel</h2>
+        <table border="1" cellpadding="6">
+            <tr>
+                <th>Username</th>
+                <th>IP</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Ban Reason</th>
+                <th>Expires</th>
+                <th>Actions</th>
+            </tr>
+            {rows}
+        </table>
     </body>
     </html>
     """
+
 
 # ============================================================
 # END OF FILE
