@@ -1,5 +1,5 @@
 fastapi
 uvicorn
-passlib[bcrypt]
-python-jose
 python-multipart
+passlib[argon2]
+python-jose
