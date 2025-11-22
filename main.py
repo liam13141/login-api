@@ -2,7 +2,7 @@ from fastapi import FastAPI, Form, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from passlib.hash import bcrypt
+from passlib.hash import argon2
 from jose import jwt, JWTError
 import json, os, time
 
@@ -203,8 +203,14 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
     if len(username) < 3 or len(password) < 4:
         raise HTTPException(400, detail="Username or password too short")
 
-    # Default role: user
+    # -------------------------------
+    # NEW: BCRYPT 72-BYTE PROTECTION
+    # -------------------------------
+    if len(password.encode("utf-8")) > 72:
+        raise HTTPException(400, detail="Password too long (max 72 characters)")
+
     hashed = bcrypt.hash(password)
+
     users[username] = {
         "password": hashed,
         "ip": ip,
@@ -263,14 +269,15 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
 
     stored_pw = user["password"]
 
-    # Hash-aware verify (supports legacy plain-text)
+    # Safe bcrypt limit protection
+    safe_pw = password[:72]
+
     valid = False
     try:
-        if bcrypt.verify(password, stored_pw):
+        if bcrypt.verify(safe_pw, stored_pw):
             valid = True
     except Exception:
-        # Not a bcrypt hash, fallback to plain comparison
-        if stored_pw == password:
+        if stored_pw == safe_pw:
             valid = True
 
     if not valid:
@@ -280,13 +287,11 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         save_users(users)
         raise HTTPException(401, detail="Incorrect password")
 
-    # Reset failure counters
-    user["failed_attempts"] = 0
-    user["locked_until"] = 0
 
-    # USER BAN CHECK
+    # Ban check
     if user.get("banned", False):
         if user.get("ban_expires") and user["ban_expires"] < time.time():
+            # auto unban
             user["banned"] = False
             user["ban_reason"] = None
             user["ban_expires"] = None
@@ -299,11 +304,10 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
                 "expires": user.get("ban_expires")
             }
 
-    # Successful login
     user["last_login"] = int(now)
-    role = user.get("role", "user")
     save_users(users)
 
+    role = user.get("role", "user")
     token = create_access_token(username=username, role=role)
     vpn_flag = detect_vpn_or_proxy(request, ip)
 
@@ -317,6 +321,12 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         "vpn_suspected": vpn_flag
     }
 
+
+
+
+
+
+    
 
 # ============================================================
 # JWT-PROTECTED CURRENT USER
