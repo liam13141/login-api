@@ -182,10 +182,7 @@ def get_settings():
 
 # ------------------ Toggle a setting (admin only) ------------------
 @app.post("/toggle-setting")
-def api_toggle(setting: str = Form(...), value: str = Form(...), user=Depends(get_current_user)):
-    if user["role"] not in ["admin", "owner"]:
-        raise HTTPException(403, "Forbidden")
-
+def api_toggle(setting: str = Form(...), value: str = Form(...)):
     settings = load_settings()
 
     if setting not in settings:
@@ -195,6 +192,7 @@ def api_toggle(setting: str = Form(...), value: str = Form(...), user=Depends(ge
     save_settings(settings)
 
     return {"message": f"{setting} updated to {settings[setting]}"}
+
 
 # ------------------ BAN SYSTEM ------------------
 @app.post("/ban")
