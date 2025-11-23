@@ -266,23 +266,33 @@ def promote(username: str = Form(...), role: str = Form(...), user=Depends(get_c
 # ============================================================
 
 @app.get("/dev", response_class=HTMLResponse)
-def dev(user=Depends(get_current_user)):
-    if user["role"] not in ["admin", "owner"]:
-        return "<h3>Access Denied</h3>"
+def dev(request: Request, code: str = None):
+    # ACCESS CHECK
+    if code != DEV_CODE:
+        return """
+        <html><body style='background:#0f172a;color:white;font-family:sans-serif;'>
+            <h3>Developer Access</h3>
+            <p>Enter the dev code:</p>
+            <form method='get'>
+                <input name='code' placeholder='dev code'>
+                <button>Enter</button>
+            </form>
+        </body></html>
+        """
 
     settings = load_settings()
     users = load_users()
 
-    # Settings rows
-    setting_html = ""
+    # SETTINGS TABLE
+    settings_rows = ""
     for key, value in settings.items():
         state = "ON" if value else "OFF"
         color = "lightgreen" if value else "red"
 
-        setting_html += f"""
+        settings_rows += f"""
         <tr>
             <td>{key}</td>
-            <td style="color:{color}">{state}</td>
+            <td style="color:{color};font-weight:bold">{state}</td>
             <td>
                 <form method='post' action='/toggle-setting'>
                     <input type='hidden' name='setting' value='{key}'>
@@ -298,22 +308,22 @@ def dev(user=Depends(get_current_user)):
         </tr>
         """
 
-    # User rows
-    user_html = ""
-    for name, d in users.items():
-        user_html += f"""
+    # USERS TABLE
+    user_rows = ""
+    for name, u in users.items():
+        user_rows += f"""
         <tr>
             <td>{name}</td>
-            <td>{d['role']}</td>
-            <td>{d['ip']}</td>
-            <td>{d['ban_reason']}</td>
-            <td>{d['ban_expires']}</td>
+            <td>{u['role']}</td>
+            <td>{u['ip']}</td>
+            <td>{u['ban_reason']}</td>
+            <td>{u['ban_expires']}</td>
 
             <td>
                 <form method='post' action='/ban'>
                     <input type='hidden' name='username' value='{name}'>
                     <input name='reason' placeholder='reason'>
-                    <input name='duration' placeholder='sec' type='number'>
+                    <input name='duration' placeholder='seconds' type='number'>
                     <button>Ban</button>
                 </form>
             </td>
@@ -326,11 +336,22 @@ def dev(user=Depends(get_current_user)):
             </td>
 
             <td>
-                {"<form method='post' action='/delete'><input type='hidden' name='username' value='"+name+"'><button>Delete</button></form>" if user['role']=='owner' else "Owner Only"}
+                <form method='post' action='/delete'>
+                    <input type='hidden' name='username' value='{name}'>
+                    <button>Delete</button>
+                </form>
             </td>
 
             <td>
-                {"<form method='post' action='/promote'><input type='hidden' name='username' value='"+name+"'><select name='role'><option>user</option><option>admin</option><option>owner</option></select><button>Set</button></form>" if user['role']=='owner' else "Owner Only"}
+                <form method='post' action='/promote'>
+                    <input type='hidden' name='username' value='{name}'>
+                    <select name='role'>
+                        <option value='user'>user</option>
+                        <option value='admin'>admin</option>
+                        <option value='owner'>owner</option>
+                    </select>
+                    <button>Set</button>
+                </form>
             </td>
         </tr>
         """
@@ -342,17 +363,21 @@ def dev(user=Depends(get_current_user)):
 
         <h3>🔧 Server Settings</h3>
         <table border='1' cellpadding='6'>
-            <tr><th>Setting</th><th>State</th><th>Actions</th></tr>
-            {setting_html}
+            <tr><th>Setting</th><th>Status</th><th>Actions</th></tr>
+            {settings_rows}
         </table>
 
         <h3>👤 User Management</h3>
         <table border='1' cellpadding='6'>
-            <tr><th>User</th><th>Role</th><th>IP</th><th>Reason</th><th>Expires</th><th>Ban</th><th>Unban</th><th>Delete</th><th>Promote</th></tr>
-            {user_html}
+            <tr>
+                <th>User</th><th>Role</th><th>IP</th><th>Reason</th><th>Expires</th>
+                <th>Ban</th><th>Unban</th><th>Delete</th><th>Promote</th>
+            </tr>
+            {user_rows}
         </table>
     </body>
     </html>
     """
+
 
 # END
