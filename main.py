@@ -336,6 +336,26 @@ def leaderboard():
         for name, info in sorted_board
     ]
 
+# Store connected users
+connected_users = set()
+
+@app.websocket("/ws/online")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_users.add(websocket)
+
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connected_users.remove(websocket)
+
+
+@app.get("/online")
+def get_online_users():
+    return {"online": len(connected_users)}
+
 
 # ============================================================
 # DEV PANEL (HTML)
