@@ -260,6 +260,84 @@ def promote(username: str = Form(...), role: str = Form(...), user=Depends(get_c
     return {"message": f"{username} promoted to {role}"}
 
 # ============================================================
+# 🎧 LISTEN TIME + LEADERBOARD SYSTEM
+# ============================================================
+
+LISTEN_DB = "listen.json"
+
+
+def load_listen():
+    if not os.path.exists(LISTEN_DB):
+        return {}
+    try:
+        return json.load(open(LISTEN_DB))
+    except:
+        return {}
+
+
+def save_listen(data):
+    json.dump(data, open(LISTEN_DB, "w"), indent=2)
+
+
+# ---- Add listening time (called by front-end) ----
+@app.post("/listen")
+def add_listen(username: str = Form(...), seconds: int = Form(...)):
+    data = load_listen()
+
+    if username not in data:
+        data[username] = {
+            "total_seconds": 0,
+            "last_update": int(time.time())
+        }
+
+    # add time
+    data[username]["total_seconds"] += seconds
+    data[username]["last_update"] = int(time.time())
+
+    save_listen(data)
+
+    return {
+        "message": "Time added",
+        "username": username,
+        "total_seconds": data[username]["total_seconds"]
+    }
+
+
+# ---- View total time for one user ----
+@app.get("/listen-time/{username}")
+def get_time(username: str):
+    data = load_listen()
+    if username not in data:
+        return {"username": username, "total_seconds": 0}
+
+    return {
+        "username": username,
+        "total_seconds": data[username]["total_seconds"]
+    }
+
+
+# ---- Leaderboard (top listeners first) ----
+@app.get("/leaderboard")
+def leaderboard():
+    data = load_listen()
+
+    # sort highest → lowest
+    sorted_board = sorted(
+        data.items(),
+        key=lambda x: x[1]["total_seconds"],
+        reverse=True
+    )
+
+    return [
+        {
+            "username": name,
+            "total_seconds": info["total_seconds"]
+        }
+        for name, info in sorted_board
+    ]
+
+
+# ============================================================
 # DEV PANEL (HTML)
 # ============================================================
 
