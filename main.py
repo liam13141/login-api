@@ -60,8 +60,8 @@ def load_settings():
         save_json(DB_SETTINGS, {"christmas_mode": False, "maintenance_mode": False})
     return load_json(DB_SETTINGS)
 
-def save_settings(data):
-    save_json(DB_SETTINGS, data)
+def save_settings(d):
+    save_json(DB_SETTINGS, d)
 
 # ============================================================
 # UTILS
@@ -129,6 +129,8 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
         "lock": 0,
         "ip": ip,
         "created": int(time.time()),
+        "favorites": [],
+        "notes": []
     }
     save_users(users)
     return {"message": f"Account created for {username}"}
@@ -175,12 +177,11 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
 def me(user = Depends(get_current_user)):
     return user
 
-# ------------------ SETTINGS (website reads every 5 sec) ------------------
+# ------------------ SETTINGS ------------------
 @app.get("/settings")
 def get_settings():
     return load_settings()
 
-# ------------------ Toggle a setting (admin only) ------------------
 @app.post("/toggle-setting")
 def api_toggle(setting: str = Form(...), value: str = Form(...)):
     settings = load_settings()
@@ -193,15 +194,18 @@ def api_toggle(setting: str = Form(...), value: str = Form(...)):
 
     return {"message": f"{setting} updated to {settings[setting]}"}
 
+# ============================================================
+# BAN SYSTEM
+# ============================================================
 
-# ------------------ BAN SYSTEM ------------------
 @app.post("/ban")
-def ban(username: str = Form(...), reason: str = Form("No reason"), duration: int = Form(0), user=Depends(get_current_user)):
+def ban(username: str = Form(...), reason: str = Form("No reason"),
+        duration: int = Form(0), user=Depends(get_current_user)):
+
     if user["role"] not in ["admin", "owner"]:
         raise HTTPException(403, "Forbidden")
 
     users = load_users()
-
     if username not in users:
         raise HTTPException(404, "User not found")
 
@@ -228,7 +232,6 @@ def unban(username: str = Form(...), user=Depends(get_current_user)):
     save_users(users)
     return {"message": f"{username} unbanned"}
 
-# ------------------ DELETE USER ------------------
 @app.post("/delete")
 def delete(username: str = Form(...), user=Depends(get_current_user)):
     if user["role"] != "owner":
@@ -242,7 +245,6 @@ def delete(username: str = Form(...), user=Depends(get_current_user)):
     save_users(users)
     return {"message": f"{username} deleted"}
 
-# ------------------ PROMOTE ------------------
 @app.post("/promote")
 def promote(username: str = Form(...), role: str = Form(...), user=Depends(get_current_user)):
     if user["role"] != "owner":
@@ -260,11 +262,30 @@ def promote(username: str = Form(...), role: str = Form(...), user=Depends(get_c
     return {"message": f"{username} promoted to {role}"}
 
 # ============================================================
-# 🎧 LISTEN TIME + LEADERBOARD SYSTEM
+# ADMIN RESET PASSWORD (NEW)
+# ============================================================
+
+@app.post("/admin/reset-password")
+def reset_pw(username: str = Form(...), new_password: str = Form(...),
+             user=Depends(get_current_user)):
+
+    if user["role"] not in ["admin", "owner"]:
+        raise HTTPException(403, "Forbidden")
+
+    users = load_users()
+    if username not in users:
+        raise HTTPException(404, "User not found")
+
+    users[username]["password"] = argon2.hash(new_password)
+    save_users(users)
+
+    return {"message": f"{username}'s password has been reset"}
+
+# ============================================================
+# LISTEN TIME + LEADERBOARD
 # ============================================================
 
 LISTEN_DB = "listen.json"
-
 
 def load_listen():
     if not os.path.exists(LISTEN_DB):
@@ -274,12 +295,9 @@ def load_listen():
     except:
         return {}
 
+def save_listen(d):
+    json.dump(d, open(LISTEN_DB, "w"), indent=2)
 
-def save_listen(data):
-    json.dump(data, open(LISTEN_DB, "w"), indent=2)
-
-
-# ---- Add listening time (called by front-end) ----
 @app.post("/listen")
 def add_listen(username: str = Form(...), seconds: int = Form(...)):
     data = load_listen()
@@ -290,7 +308,6 @@ def add_listen(username: str = Form(...), seconds: int = Form(...)):
             "last_update": int(time.time())
         }
 
-    # add time
     data[username]["total_seconds"] += seconds
     data[username]["last_update"] = int(time.time())
 
@@ -302,8 +319,6 @@ def add_listen(username: str = Form(...), seconds: int = Form(...)):
         "total_seconds": data[username]["total_seconds"]
     }
 
-
-# ---- View total time for one user ----
 @app.get("/listen-time/{username}")
 def get_time(username: str):
     data = load_listen()
@@ -315,13 +330,10 @@ def get_time(username: str):
         "total_seconds": data[username]["total_seconds"]
     }
 
-
-# ---- Leaderboard (top listeners first) ----
 @app.get("/leaderboard")
 def leaderboard():
     data = load_listen()
 
-    # sort highest → lowest
     sorted_board = sorted(
         data.items(),
         key=lambda x: x[1]["total_seconds"],
@@ -336,7 +348,11 @@ def leaderboard():
         for name, info in sorted_board
     ]
 
-# Store connected users
+
+# ============================================================
+# ONLINE WEBSOCKET
+# ============================================================
+
 connected_users = set()
 
 @app.websocket("/ws/online")
@@ -346,16 +362,47 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Keep connection alive
             await websocket.receive_text()
     except WebSocketDisconnect:
         connected_users.remove(websocket)
-
 
 @app.get("/online")
 def get_online_users():
     return {"online": len(connected_users)}
 
+# ============================================================
+# FAVORITES ENDPOINTS
+# ============================================================
+
+@app.post("/favorite/add")
+def add_fav(station: str = Form(...), user=Depends(get_current_user)):
+    users = load_users()
+    u = users[user["username"]]
+
+    if "favorites" not in u:
+        u["favorites"] = []
+
+    if station not in u["favorites"]:
+        u["favorites"].append(station)
+
+    save_users(users)
+    return {"message": "Added to favorites"}
+
+@app.post("/favorite/remove")
+def remove_fav(station: str = Form(...), user=Depends(get_current_user)):
+    users = load_users()
+    u = users[user["username"]]
+
+    if "favorites" in u and station in u["favorites"]:
+        u["favorites"].remove(station)
+
+    save_users(users)
+    return {"message": "Removed from favorites"}
+
+@app.get("/favorites")
+def get_favorites(user=Depends(get_current_user)):
+    users = load_users()
+    return users[user["username"]].get("favorites", [])
 
 # ============================================================
 # DEV PANEL (HTML)
@@ -363,7 +410,6 @@ def get_online_users():
 
 @app.get("/dev", response_class=HTMLResponse)
 def dev(request: Request, code: str = None):
-    # ACCESS CHECK
     if code != DEV_CODE:
         return """
         <html><body style='background:#0f172a;color:white;font-family:sans-serif;'>
@@ -379,7 +425,6 @@ def dev(request: Request, code: str = None):
     settings = load_settings()
     users = load_users()
 
-    # SETTINGS TABLE
     settings_rows = ""
     for key, value in settings.items():
         state = "ON" if value else "OFF"
@@ -395,6 +440,7 @@ def dev(request: Request, code: str = None):
                     <input type='hidden' name='value' value='true'>
                     <button>Enable</button>
                 </form>
+
                 <form method='post' action='/toggle-setting'>
                     <input type='hidden' name='setting' value='{key}'>
                     <input type='hidden' name='value' value='false'>
@@ -404,7 +450,10 @@ def dev(request: Request, code: str = None):
         </tr>
         """
 
-    # USERS TABLE
+    # ===========================
+    # USER TABLE WITH RESET PASSWORD
+    # ===========================
+
     user_rows = ""
     for name, u in users.items():
         user_rows += f"""
@@ -449,6 +498,16 @@ def dev(request: Request, code: str = None):
                     <button>Set</button>
                 </form>
             </td>
+
+            <td>
+                <form method='post' action='/admin/reset-password'>
+                    <input type='hidden' name='username' value='{name}'>
+                    <input type='password' name='new_password'
+                        placeholder='new password'
+                        style='width:120px;'>
+                    <button>Reset</button>
+                </form>
+            </td>
         </tr>
         """
 
@@ -466,14 +525,22 @@ def dev(request: Request, code: str = None):
         <h3>👤 User Management</h3>
         <table border='1' cellpadding='6'>
             <tr>
-                <th>User</th><th>Role</th><th>IP</th><th>Reason</th><th>Expires</th>
-                <th>Ban</th><th>Unban</th><th>Delete</th><th>Promote</th>
+                <th>User</th>
+                <th>Role</th>
+                <th>IP</th>
+                <th>Reason</th>
+                <th>Expires</th>
+                <th>Ban</th>
+                <th>Unban</th>
+                <th>Delete</th>
+                <th>Promote</th>
+                <th>Reset Password</th>
             </tr>
             {user_rows}
         </table>
+
     </body>
     </html>
     """
-
 
 # END
